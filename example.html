@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Scopelet example</title>
-  <script src="scopelet.js"></script>
+  <script src="scopelet.min.js"></script>
   <script>
     var TEMPLATE = '{.section songs}\n<h2>Songs in \'{playlist-name}\'</h2>\n<table width="100%">\n{.repeat}\n<tr>\n<td><a href="{url-base}{url}">Play</a>\n<td><i>{title}</i></td>\n<td>{artist}</td>\n</tr>\n{.end}\n</table>\n{.or}\n<p><em>(No page content matches)</em></p>\n{.end}\nInspired by <a href="http://json-template.googlecode.com/svn/trunk/doc/Introducing-JSON-Template.html">json-template</a>.';
     var CONTEXT = {

@@ -5,7 +5,7 @@ function Scope(context, parent) {
   this.parent = parent;
 }
 
-Scope.prototype.push = function(name, andthen, orelse) {
+Scope.prototype['push'] = function(name, andthen, orelse) {
   var val = this.resolve(name);
   if (val != null) {
     andthen(new Scope(val, this));
@@ -14,7 +14,7 @@ Scope.prototype.push = function(name, andthen, orelse) {
   }
 };
 
-Scope.prototype.repeat = function(andthen, orelse) {
+Scope.prototype['repeat'] = function(andthen, orelse) {
   var val = this.context;
   var i;
   if (val != null) {
@@ -43,7 +43,7 @@ Scope.prototype.resolve = function(name) {
   return res;
 };
 
-Scope.prototype.expand = function(name) {
+Scope.prototype['expand'] = function(name) {
   var res = this.resolve(name);
   if (res == null) {
     throw new ReferenceError('could not resolve "' + name + '"');
@@ -52,6 +52,15 @@ Scope.prototype.expand = function(name) {
 };
 
 var INDENT = 2;
+var n = 0;
+var T = { SECTION: n++
+        , REPEAT: n++
+        , STRING: n++
+        , EXPAND: n++
+        , OR: n++
+        , END: n++
+        , EOF: n++
+        };
 
 function Compiler(stream) {
   this.stream = stream;
@@ -85,19 +94,19 @@ Compiler.prototype.dedent = function() {
 };
 
 Compiler.prototype.end = function() {
-  if (this.consume('OR', 'END').type === 'OR') {
+  if (this.consume(T.OR, T.END).type === T.OR) {
     this.dedent();
     this.emit('}, function() {');
     this.indent();
     this.expression();
-    this.consume('END');
+    this.consume(T.END);
   }
   this.dedent();
   this.emit("});");
 };
 
 Compiler.prototype.section = function(name, inner) {
-  this.emit("ctx.push('" + name + "', function(ctx) {");
+  this.emit("c.push('" + name + "', function(c) {");
   this.indent();
   if (inner == null) {
     this.expression();
@@ -109,11 +118,11 @@ Compiler.prototype.section = function(name, inner) {
 
 Compiler.prototype.repeat = function(name) {
   if (name != null) {
-    this.emit("ctx.push('" + name + "', function(ctx) {");
+    this.emit("c.push('" + name + "', function(c) {");
     this.indent();
   }
 
-  this.emit('ctx.repeat(function(ctx) {');
+  this.emit('c.repeat(function(c) {');
   this.indent();
   this.expression();
   this.end();
@@ -136,17 +145,17 @@ Compiler.prototype.string = function(str) {
 };
 
 Compiler.prototype.expand = function(name) {
-  this.emit("s += ctx.expand('" + name + "');");
+  this.emit("s += c.expand('" + name + "');");
 };
 
 Compiler.prototype.expression = function() {
   var n = this.consume();
   switch (n.type) {
-    case 'SECTION': this.section(n.arg); return this.expression();
-    case 'REPEAT':  this.repeat(n.arg);  return this.expression();
-    case 'STRING':  this.string(n.arg);  return this.expression();
-    case 'EXPAND':  this.expand(n.arg);  return this.expression();
-    case 'EOF':     return 'EOF';
+    case T.SECTION: this.section(n.arg); return this.expression();
+    case T.REPEAT:  this.repeat(n.arg);  return this.expression();
+    case T.STRING:  this.string(n.arg);  return this.expression();
+    case T.EXPAND:  this.expand(n.arg);  return this.expression();
+    case T.EOF:     return T.EOF;
     default: this.stream.pushBack(n); return null;
   }
 };
@@ -157,7 +166,7 @@ Compiler.prototype.manyExpressions = function() {
     if (n == null) {
       throw new SyntaxError('expected expression (got ' + n + ')');
     }
-  } while (n !== 'EOF');
+  } while (n !== T.EOF);
 };
 
 Compiler.prototype.template = function() {
@@ -170,11 +179,11 @@ Compiler.prototype.template = function() {
 };
 
 Compiler.prototype.toFunction = function() {
-  return new Function('ctx', this.script);
+  return new Function('c', this.script);
 };
 
 Compiler.prototype.toString = function() {
-  return 'function(ctx) {\n' + this.script + '}\n';
+  return 'function(c) {\n' + this.script + '}\n';
 };
 
 
@@ -186,8 +195,14 @@ function Token(type, arg) {
 function TokenStream(str) {
   this.str = str;
   this.offset = 0;
-  this.state = 'EXPR';
+  this.state = S.EXPR;
 }
+
+var n = 0;
+var S = { EXPR: n++
+        , DIRECTIVE: n++
+        , EOF: n++
+        };
 
 TokenStream.prototype.pushState = function(state) {
   this.lastState = this.state;
@@ -198,41 +213,41 @@ TokenStream.prototype.next = function() {
   var m, n, result, rest;
 
   if (this.offset >= this.str.length) {
-    this.pushState('EOF');
-    return new Token('EOF');
+    this.pushState(S.EOF);
+    return new Token(T.EOF);
   }
 
   rest = this.str.slice(this.offset);
 
   switch (this.state) {
-    case 'EOF':
+    case S.EOF:
       throw new Error('EOF');
 
-    case 'EXPR':
+    case S.EXPR:
       n = rest.indexOf('{');
       if (n === -1) n = rest.length;
-      tok = new Token('STRING', rest.slice(0, n));
+      tok = new Token(T.STRING, rest.slice(0, n));
       n++;
-      this.pushState('DIRECTIVE');
+      this.pushState(S.DIRECTIVE);
       break;
 
-    case 'DIRECTIVE': // {{{{
+    case S.DIRECTIVE:
       m = /^(\.\w+)\s*([\w-]+)?\}|^([^.][^}]*)\}/.exec(rest);
       if (m == null) throw new SyntaxError('expected }, got ' +
           rest.slice(0, 24));
       n = m[0].length;
       if (m[1]) {
         switch (m[1]) {
-          case '.section': tok = new Token('SECTION', m[2]); break;
-          case '.repeat': tok = new Token('REPEAT', m[2]); break;
-          case '.or': tok = new Token('OR'); break;
-          case '.end': tok = new Token('END'); break;
+          case '.section': tok = new Token(T.SECTION, m[2]); break;
+          case '.repeat': tok = new Token(T.REPEAT, m[2]); break;
+          case '.or': tok = new Token(T.OR); break;
+          case '.end': tok = new Token(T.END); break;
           default: throw new SyntaxError('unknown directive ' + m[1]);
         }
       } else {
-        tok = new Token('EXPAND', m[3]);
+        tok = new Token(T.EXPAND, m[3]);
       }
-      this.pushState('EXPR');
+      this.pushState(S.EXPR);
       break;
 
   }
@@ -261,7 +276,7 @@ Template.prototype.expand = function(context) {
 };
 
 
-this.scopelet = {
+this['scopelet'] = {
   compile: function(source) {
     return new Template(source);
   }
